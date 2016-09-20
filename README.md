@@ -20,20 +20,20 @@ The following packages shall be installed in order to run the module:
 USAGE:
 The following command like shall be provided:
 python <installationPath/>eoudat.py [-h] [-u username] [-p password] [-l list_of_URLs] [-s] [-r] [-q] [url]
-where:
-[-h] shows an helping message, describing the functionalities of the tool
-[-u Username] is an optional field, necessary just for files protected by authentication
-[-p Password] is an optional field, necessary just for files protected by authentication
-[-s] is a command, that allowed to save and store the credential
-[-r] is a command, that allowed to re-used some saved credential
-[-q daily quota] is a command, that manage the maximum download for day
-[-l list_of_URLs] is a file, which contains a list of URLs to be downloaded
-[url] represent the address of the file to download.
+Where:
+- [-h] shows an helping message, describing the functionalities of the tool
+- [-u Username] is an optional field, necessary just for files protected by authentication
+- [-p Password] is an optional field, necessary just for files protected by authentication
+- [-s] is a command, that allowed to save and store the credential 
+- [-r] is a command, that allowed to re-used some saved credential 
+- [-q daily quota] is a command, that manage the maximum download for day 
+- [-l list_of_URLs] is a file, which contains a list of URLs to be downloaded
+- [url] represent the address of the file to download. 
 
 When the tool is launched, it will proceed with the download of the files, showing the status of the downloads. When the “Downloading: 100%” is achieved, a message of complete download will appear. It marks the end of the process.
 The files are saved in the directory from which the tool was launched.
 
-DOCUMENTATION;
+DOCUMENTATION:
 In this repository, a minimum set of supporting documents will be released.
 
 LICENCE:
