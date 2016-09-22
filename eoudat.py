@@ -10,6 +10,7 @@ import urllib
 import paramiko
 import time
 import base64
+import xml.etree.ElementTree as ET
 from threading import Thread
 from cryptography.fernet import Fernet
 from datetime import date
@@ -197,7 +198,8 @@ def download(URLs, username, password):
                 pass
         except Exception as e:
             logger.log('Error', str(e), url)
-            os.remove(filename)
+            if os.path.exists(filename):
+                os.remove(filename)
             continue
         downloads.append((filename, filesize))
 
@@ -247,6 +249,7 @@ class SSO:
         self.cookies = tempfile.mkdtemp() + '/keksi'
         self.logged_in = False
         self.login_failed = False
+        self._dummy_filename = 'sso_login.html'
         
         
     def curl(self):
@@ -283,21 +286,30 @@ class SSO:
             return False
             
             
-    def check_SSO_login(self, filename):
+    def check_SSO_login(self):
         self.login_failed = True
-        if os.path.getsize(filename) < self.threshold:
-            with open(filename, 'r') as downloaded_file:
+        if os.path.getsize(self._dummy_filename) < self.threshold:
+            with open(self._dummy_filename, 'r') as downloaded_file:
                 response = downloaded_file.read()
-                if re.search('<span class="errorMessage" id="loginerror">\nInvalid password!\n</span>', response):
-                    os.remove(filename)
-                    raise Exception('Could not log into SSO: wrong password')
-                elif re.search('User\'s entry is not found. Probably you have misspelled the ID or have not registered yet.', response):
-                    os.remove(filename)
-                    raise Exception ('Could not log into SSO: user does not exist')
-                elif re.search('<title>EO SSO</title>', response):
-                    os.remove(filename)
-                    raise Exception('Could not log into SSO.')
+            os.remove(self._dummy_filename)
+            
+            sso_regex1 = '<span class="errorMessage" id="loginerror">'
+            sso_regex2 = '</span>'
+            sso_error = re.search(sso_regex1 + '\n.+\n.+' + sso_regex2, response)
+            if sso_error:
+                sso_error = sso_error.group(0).replace(sso_regex1, '').replace(sso_regex2, '').strip()
+                raise Exception(sso_error)
+            
+            if re.search('<title>EO SSO</title>', response):
+                raise Exception('Could not log into SSO.')
+            
+            oads_namespace = '{http://ngeo.eo.esa.int/schema/webserver}'
+            oads_response = ET.fromstring(response)
+            oads_code = oads_response.find(oads_namespace + 'ResponseCode')
+            if oads_code.text != 'AUTHORIZED':
+                raise Exception('OADS: ' + oads_code.text)
         else:
+            os.remove(self._dummy_filename)
             self.logged_in = True
             self.login_failed = False
             
@@ -342,12 +354,13 @@ class SSO:
         c.setopt(pycurl.POSTFIELDS, data)
         c.setopt(pycurl.URL, 'https://eo-sso-idp.eo.esa.int:443/idp/umsso20/login?null')
         c.setopt(pycurl.NOBODY, False)
-        self._dummy_filename = url.split('/')[-1]
         c.setopt(pycurl.WRITEFUNCTION, self.download_block)
         try:
             c.perform()
         except:
-            self.check_SSO_login(self._dummy_filename)
+            pass
+        finally:
+            self.check_SSO_login()
             c.close()
             
         
@@ -365,9 +378,9 @@ class Logger:
                 
     def log(self, type, message, url=None, filename=None, line_nr=None):
         if url and filename and line_nr:
-            self.logs.append('[{:s}] {:s} while downloading {:s} in {:s}, line {:d}'.format(type, message, url, filename, line_nr))
+            self.logs.append('[{:s}] {:s} - while downloading {:s} in {:s}, line {:d}'.format(type, message, url, filename, line_nr))
         elif url:
-            self.logs.append('[{:s}] {:s} while downloading {:s}'.format(type, message, url))
+            self.logs.append('[{:s}] {:s} - while downloading {:s}'.format(type, message, url))
         else:
             self.logs.append('[{:s}] {:s}'.format(type, message))
         
@@ -394,6 +407,7 @@ if __name__ == '__main__':
     parser.add_argument('-q', metavar='daily_quota', dest='daily_quota')
     args = parser.parse_args()
     
+    logger = Logger()
     daily_quota = 0
     username = args.username
     password = args.password
@@ -415,7 +429,7 @@ if __name__ == '__main__':
         
     if args.read_cred:
         if args.username and args.password:
-            Logger().log('Warning','Username and password are already provided, option -r is ignored')
+            logger().log('Warning','Username and password are already provided, option -r is ignored')
         else:
             username, password = read_credentials()
         
@@ -429,9 +443,12 @@ if __name__ == '__main__':
             
             tomorrow = date.today().replace(day=date.today().day+1)
             till_tomorrow = time.mktime(tomorrow.timetuple()) - time.time()
-            print('Download quota for today reached, waiting for {:3.2f} minutes.'.format(till_tomorrow/60))
-            time.sleep(till_tomorrow)
+            
+            if URLs:
+                print('Download quota for today reached, waiting for {:3.2f} minutes.'.format(till_tomorrow/60))
+                time.sleep(till_tomorrow)
     else:
         download(URLs, username, password)
         
+    logger.print_log()
     print('Finished all downloads')
