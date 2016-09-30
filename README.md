@@ -5,10 +5,10 @@ This tool allows to download files from different locations, both from open or p
 The main functionalities are:
 - retrieve files from a open http location
 - retrieve files from a regular ftp server (through regular authentication)
-- retrieve files by Single Sign On authentication
-- retrieve files making use of secure authentication
+- retrieve files making use of different secure authentications
+- retrieve files from specific platform (i.e. ESA Online Dissemination platform)
 
-The tool can also: manage multiple download, manage a maximum number of downloads per day, permit to save and store credentials for specific servers.
+The tool can also: mangage to download a list of file, manage multiple download, manage a maximum number of downloads per day, permit to save and store credentials for specific servers.
 
 
 REQUIREMENTS:
@@ -24,7 +24,7 @@ The following packages shall be installed in order to run the module:
 USAGE:
 
 The following command like shall be provided:
-python <installationPath/>eoudat.py [-h] [-u username] [-p password] [-l list_of_URLs] [-s] [-r] [-q] [url]
+python <installationPath/>eoudat.py [-h] [-u username] [-p password] [-l list_of_URLs] [-s] [-r] [-q] [url] [--clean]
 
 Where:
 - [-h] shows an helping message, describing the functionalities of the tool
@@ -35,10 +35,13 @@ Where:
 - [-q daily quota] is a command, that manage the maximum download for day 
 - [-l list_of_URLs] is a file, which contains a list of URLs to be downloaded
 - [url] represent the addresses of the files to download. 
+- [--clean] is a command, that deletes the file in which the credentials are stored
 
 When the tool is launched, it will proceed with the download of the files, showing the status of the downloads. When the “Downloading: 100%” is achieved, a message of complete download will appear. It marks the end of the process.
 The files are saved in the directory from which the tool was launched.
 
+Below is displayed an example of instruction, in order to download a protected file from a ftp address:
+python <installationPath/>eoudat.py -u username -p password ftp://...../address_of_file_to_download.zip
 
 DOCUMENTATION:
 
