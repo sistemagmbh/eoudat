@@ -15,32 +15,42 @@ from threading import Thread
 from cryptography.fernet import Fernet
 from datetime import date
 
-def progress(downloads):
-    finished = [False] * len(downloads)
+def progress(downloads, threads):
+#    finished = [False] * len(downloads)
     shorten = lambda x: x if len(x) < 52 else x[0:28] + '...' + x[-28:]
     if len(downloads) == 1:
         header_message = 'Downloading one file:'
     else:
         header_message = 'Downloading {:d} files:'.format(len(downloads))
     
+    def pretty_print(size):
+        prefixes = ['', 'kB', 'MB', 'GB', 'TB', 'PB', 'EB']
+        for i,v in enumerate(prefixes):
+            if size/(1000**(i+1)) == 0:
+                return '{:.2f} {:s}'.format(float(size)/(1000**(i)), v)
+            #if the end of the list is reached, keep EB as output
+            elif v is prefixes[-1]:
+                return '{:.2f} {:s}'.format(float(size)/(1000**(i)), v)
+    
+    #TODO: refactor with list comprehension
+    #print downloads
     for f in downloads:
         if not os.path.exists(f[0]):
             while not os.path.exists(f[0]):
-                time.sleep(0.01)
+                time.sleep(0.05)
     
-    while not all(i == True for i in finished):
+    #TODO: add pretty print if get_size returns -1
+    while not all(t[0].is_alive() == False for t in threads):
         print(header_message)
         for idx,f in enumerate(downloads):
             file_progress = (os.path.getsize(f[0])*100.)/f[1]
             print('{:s} {:5.2f}%'.format(shorten(f[0]), file_progress))
-            if int(file_progress) >= 100:
-                finished[idx] = True
         time.sleep(0.1)
         os.system('cls' if os.name == 'nt' else 'clear')
         
     print(header_message)
     for f in downloads:
-        file_progress = (os.path.getsize(f[0])*100.)/f[1]
+        file_progress = (os.path.getsize(f[0])*100.)/f[1]	
         print('{:s}: {:5.2f}%'.format(shorten(f[0]), file_progress))
     Logger().print_log()
     Logger().reset_log()
@@ -82,11 +92,14 @@ def get_size(url, username=None, password=None):
     url_type = url.split(':')[0]
     if url_type == 'ssh' or url_type == 'sftp':
         return ssh_get_size(url, username, password)
-    elif sso.is_SSO(url):
+        
+    if sso.is_SSO(url):
         sso.login(url, username, password)
         return sso.get_size(url)
-    else:
-        return curl_get_size(url, username, password)
+        
+    if url_type == 'http' or url_type == 'https':        
+        check_http_statuscode(url)
+    return curl_get_size(url, username, password)
 
 
 def get_http_statuscodes(url):
@@ -135,7 +148,7 @@ def download_curl(url, username, password):
             
 
 def download_http(url, username=None, password=None):
-    check_http_statuscode(url)    
+    check_http_statuscode(url)
     sso = SSO()
     if sso.is_SSO(url):
         sso.login(url, username, password)
@@ -186,6 +199,8 @@ def download(URLs, username, password):
         url_type = url.split(':')[0]
         try:
             filesize = get_size(url, username, password)
+            if filesize < 0:
+                logger.log('Warning', 'Could not get filesize for {:s}'.format(url))
             
             if url_type == 'http' or url_type == 'https':
                 check_http_statuscode(url)
@@ -197,6 +212,7 @@ def download(URLs, username, password):
             else:
                 pass
         except Exception as e:
+            logger.log_debug('Error', str(e), url)
             logger.log('Error', str(e), url)
             if os.path.exists(filename):
                 os.remove(filename)
@@ -207,45 +223,67 @@ def download(URLs, username, password):
         for t in threads:
             t[0].start()
     except Exception as e:
-        exc_type, exc_obj, exc_tb = sys.exc_info()
-        fname = os.path.split(exc_tb.tb_frame.f_code.co_filename)[1]
-        logger().log('Error', str(e), t[1], fname, exc_tb.tb_linno)
+        logger.log_debug('Error', str(e), url)
+        logger.log('Error', str(e), t[1])
+        if os.path.exists(filename):
+            os.remove(filename)
 
-    show_progress = Thread(target=progress, args=[downloads])
+    show_progress = Thread(target=progress, args=[downloads, threads])
     show_progress.start()
     for t in threads:
         t[0].join()
     show_progress.join()
     
 
-#TODO: directory for credentials with hostname
 def load_credentials():
-    key = 'FRRltba98dCxL9PiYwsvx5nOY6Lwn1GGAwaLUwgloro='
     filename = os.path.expanduser('~') + '/.eou_cred'
+    key = 'FRRltba98dCxL9PiYwsvx5nOY6Lwn1GGAwaLUwgloro='
     return key, filename
     
         
-def save_credentials(username, password):
+def save_credentials(host, username, password):
     key, filename = load_credentials()
+    credentials = {}
+    if os.path.exists(filename):
+        credentials = read_credentials()
+    credentials[host] = [username, password]
+    
     with open(filename, 'w') as f:
         cypher = Fernet(key)
-        token = cypher.encrypt(username) + '\n' + cypher.encrypt(password)
-        f.write(base64.b64encode(token))
+        for key, value in credentials.iteritems():
+            token = cypher.encrypt(key) + '\n' + cypher.encrypt(value[0]) + '\n' + cypher.encrypt(value[1])
+            f.write(base64.b64encode(token) + '\n')
     
 
-def read_credentials():
+def read_credentials(requested_host=None):
     key, filename = load_credentials()
-    with open(filename, 'r') as f:
-        cypher = Fernet(key)
-        token = base64.b64decode(f.read()).split('\n')
-        username = cypher.decrypt(token[0])
-        password = cypher.decrypt(token[1])
-        return username, password
+    credentials = {}
+    try:
+        with open(filename, 'r') as f:
+            cypher = Fernet(key)
+            lines = map(lambda x: x.strip(), f.readlines())
+            for line in lines:
+                token = base64.b64decode(line).split('\n')
+                host = cypher.decrypt(token[0])
+                username = cypher.decrypt(token[1])
+                password = cypher.decrypt(token[2])
+                credentials[host] = [username, password]
+    except IOError:
+        print('Could not open {:s}.'.format(filename))
+        print('Probably the credentials haven\'t been saved with the -s option.')
+        exit(0)
+    except IndexError:
+        print('Could not read {:s}. Delete the file by starting this program with the --clean option.'.format(filename))
+        
+    if requested_host:
+        return credentials[requested_host][0], credentials[requested_host][1]
+    else:
+        return credentials
         
         
 class SSO:
     def __init__(self):
-        self.threshold = 1024*1024
+        self.threshold = 1000*1000
         self.cookies = tempfile.mkdtemp() + '/keksi'
         self.logged_in = False
         self.login_failed = False
@@ -285,8 +323,9 @@ class SSO:
         else:
             return False
             
-            
-    def check_SSO_login(self):
+#TODO: try with non-cached (new) product            
+#TODO: refactor: remove url
+    def check_SSO_login(self, url):
         self.login_failed = True
         if os.path.getsize(self._dummy_filename) < self.threshold:
             with open(self._dummy_filename, 'r') as downloaded_file:
@@ -303,15 +342,79 @@ class SSO:
             if re.search('<title>EO SSO</title>', response):
                 raise Exception('Could not log into SSO.')
             
-            oads_namespace = '{http://ngeo.eo.esa.int/schema/webserver}'
+            self.logged_in = True
+            self.check_OADS(response, url)
+                
+            """
             oads_response = ET.fromstring(response)
+            oads_namespace = re.search('\{.+\}', oads_response.tag).group(0)
             oads_code = oads_response.find(oads_namespace + 'ResponseCode')
-            if oads_code.text != 'AUTHORIZED':
-                raise Exception('OADS: ' + oads_code.text)
+            oads_message = oads_response.find(oads_namespace + 'ResponseMessage')
+            self.logged_in = True            
+            
+            if oads_code is not None and oads_code.text != 'ACCEPTED':
+                raise Exception('[OADS error] ' + oads_code.text + (': ' + oads_message.text if oads_message is not None else ''))
+#TODO: implement polling (?)            
+            elif oads_code is not None and oads_code.text == 'ACCEPTED':
+                wait = int(oads_response.find(oads_namespace + 'RetryAfter').text)
+                print('Authorized for downloading the product, waiting {:d} seconds until it\'s ready'.format(wait))
+                time.sleep(wait)
+            """
         else:
             os.remove(self._dummy_filename)
             self.logged_in = True
             self.login_failed = False
+
+#TODO: REFACTOR!!!
+    def check_OADS(self, response, url):
+        oads_response = ET.fromstring(response)
+        oads_namespace = re.search('\{.+\}', oads_response.tag).group(0)
+        oads_code = oads_response.find(oads_namespace + 'ResponseCode')
+        oads_message = oads_response.find(oads_namespace + 'ResponseMessage')
+        
+        if oads_code is not None and oads_code.text != 'ACCEPTED':
+            raise Exception('[OADS error] ' + oads_code.text + (': ' + oads_message.text if oads_message is not None else ''))
+#TODO: implement polling (?)            
+        elif oads_code is not None and oads_code.text == 'ACCEPTED':
+            wait = int(oads_response.find(oads_namespace + 'RetryAfter').text)
+            print('Authorized for downloading the product, waiting {:d} seconds until it\'s ready'.format(wait))
+            time.sleep(wait)
+        
+        sucess = False
+        
+        while not sucess:
+            print 'Waiting done, trying again'
+            filename = url.split('/')[-1]
+            try:            
+                c = self.curl()
+                c.setopt(pycurl.URL, url)
+                c.setopt(pycurl.NOBODY, False)
+                c.setopt(pycurl.WRITEFUNCTION, self.download_block)
+                c.perform()
+            except:
+                pass
+            
+            with open(filename, 'r') as downloaded_file:
+                response = downloaded_file.read()
+            os.remove(filename)
+            
+            try:
+                oads_response = ET.fromstring(response)
+                oads_namespace = re.search('\{.+\}', oads_response.tag).group(0)
+                oads_code = oads_response.find(oads_namespace + 'ResponseCode')
+                oads_message = oads_response.find(oads_namespace + 'ResponseMessage')
+            except:
+                sucess = True
+                break
+            
+            if oads_code is not None and oads_code.text != 'ACCEPTED':
+                raise Exception('[OADS error] ' + oads_code.text + (': ' + oads_message.text if oads_message is not None else ''))
+    #TODO: implement polling (?)            
+            elif oads_code is not None and oads_code.text == 'ACCEPTED':
+                wait = int(oads_response.find(oads_namespace + 'RetryAfter').text)
+                print('Authorized for downloading the product, waiting {:d} seconds until it\'s ready'.format(wait))
+                time.sleep(wait)
+        
             
             
     def download_SSO(self, url):
@@ -328,19 +431,26 @@ class SSO:
             c.close()
 
                 
+#TODO: refactor!
+#TODO: back to WRITEFUNCTION = lambda x: 0
+#TODO: http://stackoverflow.com/questions/128389/what-are-xml-namespaces-for
+#      https://www.google.at/search?client=ubuntu&channel=fs&q=curl+get+only&ie=utf-8&oe=utf-8&gfe_rd=cr&ei=i3vqV6a-Camg8weL7ZOQDA#channel=fs&q=libcurl+get+only
     def get_size(self, url):
         if not self.logged_in:
             return
-        try:
-            c = self.curl()
-            c.setopt(pycurl.NOBODY, False)
-            c.setopt(pycurl.URL, url)
-            c.setopt(pycurl.WRITEFUNCTION, lambda x: 0)
+
+        size = -1
+        c = self.curl()
+        c.setopt(pycurl.NOBODY, False)
+        c.setopt(pycurl.WRITEFUNCTION, lambda x: 0)
+        c.setopt(pycurl.URL, url)
+        try:        
             c.perform()
-        except:
+        except pycurl.error:
             size = int(c.getinfo(pycurl.CONTENT_LENGTH_DOWNLOAD))
+        finally:
             c.close()
-            return size
+        return size
     
     
     def login(self, url, username, password):
@@ -360,7 +470,9 @@ class SSO:
         except:
             pass
         finally:
-            self.check_SSO_login()
+            #TODO: remove check_http_status code (maybe too much requests for the limited quota)
+            check_http_statuscode(url)
+            self.check_SSO_login(url)
             c.close()
             
         
@@ -375,66 +487,106 @@ class SSO:
 class Logger:
     def __init__(self):
         self.logs = []
+        #TODO: remove debugging stuff for release
+        self.debug_log = []
                 
-    def log(self, type, message, url=None, filename=None, line_nr=None):
-        if url and filename and line_nr:
-            self.logs.append('[{:s}] {:s} - while downloading {:s} in {:s}, line {:d}'.format(type, message, url, filename, line_nr))
-        elif url:
-            self.logs.append('[{:s}] {:s} - while downloading {:s}'.format(type, message, url))
+    def log(self, log_type, message, url=None,):
+        if url:
+            self.logs.append('[{:s}] {:s} - while downloading {:s}'.format(log_type, message, url))
         else:
-            self.logs.append('[{:s}] {:s}'.format(type, message))
+            self.logs.append('[{:s}] {:s}'.format(log_type, message))
         
     def print_log(self):
         for log in self.logs:
             print(log)
+    #TODO: remove debugging stuff for release
+        self.write_debug()
             
     def reset_log(self):
         self.logs = []
+        
+    #TODO: remove debugging stuff for release
+    def log_debug(self, log_type, message, url):
+        exc_type, exc_obj, exc_tb = sys.exc_info()
+        function_name = exc_tb.tb_frame.f_code.co_name
+        line_nr = exc_tb.tb_lineno
+        self.debug_log.append('[{:s}] {:s} - while downloading {:s} in {:s}(), line {:d}'.format(log_type, message, url, function_name, line_nr))
+    
+    def write_debug(self):
+        with open(os.path.expanduser('~/eou_debug.log'), 'w') as f:
+            for log in self.debug_log:
+                f.write(log)
 
         
 SSO = lambda single_SSO = SSO(): single_SSO
 Logger = lambda single_logger = Logger(): single_logger
     
-
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(prog=sys.argv[0],description='An utility to perform multiple downloads to a sink directory',epilog='SISTEMA GmbH  <http://www.sistema.at>')
-    parser.add_argument('URLs', metavar='url', type=str, nargs='*', help='One or more URLs to be downloaded')
-    parser.add_argument('-u', metavar='username', dest='username')
-    parser.add_argument('-p', metavar='password', dest='password')
-    parser.add_argument('-l', metavar='list_of_URLs', dest='input_list')
-    parser.add_argument('-s', action='store_true', dest='store_cred')
-    parser.add_argument('-r', action='store_true', dest='read_cred')
-    parser.add_argument('-q', metavar='daily_quota', dest='daily_quota')
+    cred_filename = load_credentials()[1]
+    parser = argparse.ArgumentParser(prog=sys.argv[0],description='An utility to perform multiple downloads to a sink directory.',epilog='SISTEMA GmbH  <http://www.sistema.at>')
+    parser.add_argument('URLs', metavar='url', type=str, nargs='*', help='one or more URLs to be downloaded')
+    parser.add_argument('-u', metavar='username', dest='username', help='username for downloading the file(s) (only if needed)')
+    parser.add_argument('-p', metavar='password', dest='password', help='password for the user\'s account (only if needed)')
+    parser.add_argument('-l', metavar='list_of_URLs', dest='input_list', help='path to text file which includes a list of files (one URL per line) to be downloaded (the URLs get appended to the URls given in the command line)')
+    parser.add_argument('-s', action='store_true', dest='store_cred', help='the given username and password are written to the file "{:s}" (encrypted)'.format(cred_filename))
+    parser.add_argument('-r', action='store_true', dest='read_cred', help='reads the credentials from "{:s}" (if username and password are provided this option is ignored)'.format(cred_filename))
+    parser.add_argument('-q', metavar='daily_quota', dest='daily_quota', help='the maximum number of dowloads performed per day')
+    parser.add_argument('--clean', action='store_true', dest='clean_credentials', help='deletes the file "{:s}" if available (if -s is set, the old file gets deleted first and is replaced by a new one)'.format(cred_filename))
     args = parser.parse_args()
     
+    if not len(sys.argv) > 1:
+        parser.print_help()
+        exit(0)
+    
     logger = Logger()
+    lines = []
     daily_quota = 0
     username = args.username
     password = args.password
-    URLs = args.URLs
+    regex = '(http[s]?://.*)|(ftp://.*)|(ssh://.*)|(sftp://.*)'
+    URLs = filter(lambda x: re.match(regex, x), args.URLs)
     
     if args.input_list:
         with open(args.input_list, 'r') as f:
             lines = f.readlines()
-            regex = '(http[s]?://.*)|(ftp://.*)|(ssh://.*)|(sftp://.*)'
             for line in lines:
                 if re.match(regex, line):
                     URLs.append(line.strip())
-    if not URLs:
-        parser.print_help()
-        exit(0)
+                    
+    if args.clean_credentials:
+        if os.path.exists(cred_filename):
+            os.remove(cred_filename)
+            logger.log('Info', 'Deleted the credential file {:s}'.format(cred_filename))
+            del cred_filename
 
+    if len(URLs) < len(args.URLs) + len(lines):
+        logger.log('Warning', 'Not all given links are valid and can be added to the URL list.')
+    
+    if not URLs:
+        print('No valid download links were given, exiting now.')
+        logger.print_log()
+        exit(0)
+        
     if args.daily_quota:
         daily_quota = int(args.daily_quota)
-        
+    
+    host = URLs[0].split('://')[1].split('/')[0]
     if args.read_cred:
-        if args.username and args.password:
-            logger().log('Warning','Username and password are already provided, option -r is ignored')
+        if username and password:
+            logger.log('Warning','Username and password are already provided, option -r is ignored')
         else:
-            username, password = read_credentials()
+            username, password = read_credentials(host)
         
     if args.store_cred:
-        save_credentials(username, password)
+        save_credentials(host, username, password)
+        
+    if username and not password:
+        logger.log('Warning', 'Username is given, but no password')
+        
+    hosts = set()
+    map(lambda x: hosts.add(x.split('://')[1].split('/')[0]), URLs)
+    if len(hosts) > 1 and username and password:
+        logger.log('Warning', 'Credentials are given, but the URLs have different hosts. Because of that it might be possible that not all files are downloaded.')
 
     if daily_quota:
         while URLs:
