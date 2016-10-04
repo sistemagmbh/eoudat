@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 from threading import Thread
 from cryptography.fernet import Fernet
 from datetime import date
+from datetime import timedelta
 
 def progress(downloads, threads):
 #    finished = [False] * len(downloads)
@@ -37,7 +38,7 @@ def progress(downloads, threads):
     for f in downloads:
         if not os.path.exists(f[0]):
             while not os.path.exists(f[0]):
-                time.sleep(0.05)
+                time.sleep(0.1)
     
     #TODO: add pretty print if get_size returns -1
     while not all(t[0].is_alive() == False for t in threads):
@@ -50,6 +51,10 @@ def progress(downloads, threads):
         
     print(header_message)
     for f in downloads:
+        if f[0] is None:
+            print('{:s}: {:s} MB'.format(shorten(f[0]), pretty_print(os.path.getsize([0]))))
+            continue
+        
         file_progress = (os.path.getsize(f[0])*100.)/f[1]	
         print('{:s}: {:5.2f}%'.format(shorten(f[0]), file_progress))
     Logger().print_log()
@@ -197,6 +202,7 @@ def download(URLs, username, password):
             continue
             
         url_type = url.split(':')[0]
+        
         try:
             filesize = get_size(url, username, password)
             if filesize < 0:
@@ -325,7 +331,7 @@ class SSO:
             
 #TODO: try with non-cached (new) product            
 #TODO: refactor: remove url
-    def check_SSO_login(self, url):
+    def check_SSO_login(self, url, username, password):
         self.login_failed = True
         if os.path.getsize(self._dummy_filename) < self.threshold:
             with open(self._dummy_filename, 'r') as downloaded_file:
@@ -336,16 +342,14 @@ class SSO:
             sso_regex2 = '</span>'
             sso_error = re.search(sso_regex1 + '\n.+\n.+' + sso_regex2, response)
             if sso_error:
-                sso_error = sso_error.group(0).replace(sso_regex1, '').replace(sso_regex2, '').strip()
-                raise Exception(sso_error)
+                sso_error_message = sso_error.group(0).replace(sso_regex1, '').replace(sso_regex2, '').strip()
+                raise Exception(sso_error_message)
             
             if re.search('<title>EO SSO</title>', response):
                 raise Exception('Could not log into SSO.')
             
             self.logged_in = True
-            self.check_OADS(response, url)
-                
-            """
+            
             oads_response = ET.fromstring(response)
             oads_namespace = re.search('\{.+\}', oads_response.tag).group(0)
             oads_code = oads_response.find(oads_namespace + 'ResponseCode')
@@ -354,12 +358,16 @@ class SSO:
             
             if oads_code is not None and oads_code.text != 'ACCEPTED':
                 raise Exception('[OADS error] ' + oads_code.text + (': ' + oads_message.text if oads_message is not None else ''))
-#TODO: implement polling (?)            
+            #TODO: implement polling (?)
             elif oads_code is not None and oads_code.text == 'ACCEPTED':
                 wait = int(oads_response.find(oads_namespace + 'RetryAfter').text)
                 print('Authorized for downloading the product, waiting {:d} seconds until it\'s ready'.format(wait))
                 time.sleep(wait)
-            """
+                
+                self.logged_in = False
+                self.login_failed = False
+                self.login(url, username, password)
+                            
         else:
             os.remove(self._dummy_filename)
             self.logged_in = True
@@ -411,7 +419,8 @@ class SSO:
                 raise Exception('[OADS error] ' + oads_code.text + (': ' + oads_message.text if oads_message is not None else ''))
     #TODO: implement polling (?)            
             elif oads_code is not None and oads_code.text == 'ACCEPTED':
-                wait = int(oads_response.find(oads_namespace + 'RetryAfter').text)
+                #wait = int(oads_response.find(oads_namespace + 'RetryAfter').text)
+                wait = 180
                 print('Authorized for downloading the product, waiting {:d} seconds until it\'s ready'.format(wait))
                 time.sleep(wait)
         
@@ -472,7 +481,7 @@ class SSO:
         finally:
             #TODO: remove check_http_status code (maybe too much requests for the limited quota)
             check_http_statuscode(url)
-            self.check_SSO_login(url)
+            self.check_SSO_login(url, username, password)
             c.close()
             
         
@@ -500,7 +509,7 @@ class Logger:
         for log in self.logs:
             print(log)
     #TODO: remove debugging stuff for release
-        self.write_debug()
+#        self.write_debug()
             
     def reset_log(self):
         self.logs = []
@@ -593,7 +602,7 @@ if __name__ == '__main__':
             download(URLs[0:daily_quota], username, password)
             del URLs[0:daily_quota]
             
-            tomorrow = date.today().replace(day=date.today().day+1)
+            tomorrow = (date.today() + timedelta(days=1))
             till_tomorrow = time.mktime(tomorrow.timetuple()) - time.time()
             
             if URLs:
