@@ -15,9 +15,10 @@ from threading import Thread
 from cryptography.fernet import Fernet
 from datetime import date
 from datetime import timedelta
+from ftplib import FTP_TLS
 
+#TODO: add average progress
 def progress(downloads, threads):
-#    finished = [False] * len(downloads)
     shorten = lambda x: x if len(x) < 52 else x[0:28] + '...' + x[-28:]
     if len(downloads) == 1:
         header_message = 'Downloading one file:'
@@ -33,39 +34,49 @@ def progress(downloads, threads):
             elif v is prefixes[-1]:
                 return '{:.2f} {:s}'.format(float(size)/(1000**(i)), v)
     
-    #TODO: refactor with list comprehension
-    #print downloads
-    for f in downloads:
-        if not os.path.exists(f[0]):
-            while not os.path.exists(f[0]):
-                time.sleep(0.1)
-    
-    #TODO: add pretty print if get_size returns -1
-    while not all(t[0].is_alive() == False for t in threads):
+    while True:
         print(header_message)
         for idx,f in enumerate(downloads):
-            file_progress = (os.path.getsize(f[0])*100.)/f[1]
-            print('{:s} {:5.2f}%'.format(shorten(f[0]), file_progress))
-        time.sleep(0.1)
+            try:
+                if f[1] is None:
+                    pp = pretty_print(os.path.getsize(f[0]))
+                    print('{:s}: {:s}'.format(shorten(f[0]), pp))
+                    continue
+            
+                file_progress = (os.path.getsize(f[0])*100.)/f[1]
+                print('{:s} {:5.2f}%'.format(shorten(f[0]), file_progress))
+            except OSError:
+                print('Waiting for {:s} to be downloaded'.format(shorten(f[0])))
+                pass            
+        time.sleep(0.05)
         os.system('cls' if os.name == 'nt' else 'clear')
-        
+        #TODO: improve this, maybe use locks!
+        if all(t[0].ident != None for t in threads) and all(t[0].is_alive() != True for t in threads):
+            break       
+
     print(header_message)
     for f in downloads:
-        if f[0] is None:
-            print('{:s}: {:s} MB'.format(shorten(f[0]), pretty_print(os.path.getsize([0]))))
+        if f[1] is None:
+            pp = pretty_print(os.path.getsize(f[0]))
+            print('{:s}: {:s}'.format(shorten(f[0]), pp))
             continue
         
         file_progress = (os.path.getsize(f[0])*100.)/f[1]	
         print('{:s}: {:5.2f}%'.format(shorten(f[0]), file_progress))
-    Logger().print_log()
-    Logger().reset_log()
-                
+    
+    if len(downloads) > 0:
+        Logger().print_log()
+        Logger().reset_log()
+
 
 # TODO: check/download ftp with FTP lib(?)
-def curl_get_size(url, username=None, password=None):
+def curl_get_size(url, username=None, password=None, proxy=None, filename=None):
     c = pycurl.Curl()
     if username != None and password != None:
+        c.setopt(pycurl.HTTPAUTH, pycurl.HTTPAUTH_ANY);
         c.setopt(pycurl.USERPWD, '%s:%s' % (username, password))
+    if proxy != None:
+        c.setopt(pycurl.PROXY, proxy)        
     c.setopt(pycurl.URL, url)
     c.setopt(pycurl.FOLLOWLOCATION, True)
     c.setopt(pycurl.SSL_VERIFYHOST, False)
@@ -90,24 +101,43 @@ def ssh_get_size(url, username, password):
     except Exception as e:
         raise e
     return size
+    
+
+def ftpes_get_size(url, username, password):
+    host = url.split('/')[2]
+    path = url.replace('ftpes://', '').replace('ftps://', '').replace(host, '')
+    size = None
+    try:
+        ftps = FTP_TLS(host)
+        ftps.login(username, password)
+        ftps.prot_p()
+        size = ftps.size(path)
+        ftps.close()
+    except Exception as e:
+        raise e
+    return size
 
 
-def get_size(url, username=None, password=None):
+def get_size(url, username=None, password=None, proxy=None):
     sso = SSO()
     url_type = url.split(':')[0]
+#TODO: add proxy support for SSH    
     if url_type == 'ssh' or url_type == 'sftp':
         return ssh_get_size(url, username, password)
-        
-    if sso.is_SSO(url):
-        sso.login(url, username, password)
+    elif url_type == url_type == 'ftps:' or url_type == 'ftpes':
+        return ftpes_get_size(url, username, password)
+
+    if sso.is_SSO(url, proxy):
+        sso.login(url, username, password, proxy)
         return sso.get_size(url)
-        
-    if url_type == 'http' or url_type == 'https':        
-        check_http_statuscode(url)
-    return curl_get_size(url, username, password)
+
+#TODO: add password support for status check        
+#    if url_type == 'http' or url_type == 'https':        
+#        check_http_statuscode(url)
+    return curl_get_size(url, username, password, proxy)
 
 
-def get_http_statuscodes(url):
+def get_http_statuscodes(url, username=None, password=None):
     status_codes = []
     def strip_header(buffer):
         if buffer.startswith('HTTP'):
@@ -121,20 +151,23 @@ def get_http_statuscodes(url):
     c.setopt(pycurl.SSL_VERIFYHOST, False)
     c.setopt(pycurl.SSL_VERIFYPEER, False)
     c.setopt(pycurl.FOLLOWLOCATION, True)
+    if username and password:
+        c.setopt(pycurl.USERPWD, '%s:%s' % (username,password))
     c.setopt(pycurl.NOBODY, True)
     c.setopt(pycurl.HEADERFUNCTION, strip_header)
     c.perform()
     return status_codes
     
     
-def check_http_statuscode(url):
-    status_code = get_http_statuscodes(url)[-1]
+def check_http_statuscode(url, username=None, password=None):
+    status_code = get_http_statuscodes(url, username, password)[-1]
     if status_code[0] >= 400:
         raise Exception('HTTP Error {:d}: {:s}'.format(status_code[0], status_code[1]))
-    
         
-def download_curl(url, username, password):
-    filename = url.split('/')[-1]
+        
+def download_curl(url, username, password, proxy=None, filename=None):
+    if not filename:
+        filename = url.split('/')[-1]
     try:
         with open(filename, 'wb') as f:
             c = pycurl.Curl()
@@ -144,22 +177,30 @@ def download_curl(url, username, password):
             c.setopt(pycurl.FOLLOWLOCATION, True)
             c.setopt(pycurl.WRITEDATA, f)
             if username != None and password != None:
+                c.setopt(pycurl.HTTPAUTH, pycurl.HTTPAUTH_ANY);
                 c.setopt(pycurl.USERPWD, '%s:%s' % (username, password))
+                
+            if proxy != None:
+                c.setopt(pycurl.PROXY, proxy)
             c.perform()
+            
+#            with open(tmp_cookies) as f:
+#                print f.read()
+            
             c.close()
     except Exception as e:
         os.remove(filename)
         raise e
             
 
-def download_http(url, username=None, password=None):
-    check_http_statuscode(url)
+def download_http(url, username=None, password=None, proxy=None, filename=None):
+    check_http_statuscode(url, username, password)
     sso = SSO()
     if sso.is_SSO(url):
         sso.login(url, username, password)
         sso.download_SSO(url)
     else:
-        download_curl(url, username, password)
+        download_curl(url, username, password, proxy, filename)
     
     
 def download_ssh(url, username, password):
@@ -180,14 +221,30 @@ def download_ssh(url, username, password):
         raise e
     
     
-def download_ftp(url, username, password):
+def download_ftp(url, username, password, proxy=None):
     if username == None or password == None:
         username = 'anonymous'
         password = 'anonymous@domain.com'
     download_curl(url, username, password)
     
+
+def download_ftps(url, username, password, proxy=None):
+    filename = url.split('/')[-1]
+    host = url.split('/')[2]
+    path = url.replace('ftpes://', '').replace('ftps://', '').replace(host, '')
+    try:
+        ftps = FTP_TLS(host)
+        ftps.login(username, password)
+        ftps.prot_p()
+        with open(filename, 'wb') as f:
+            ftps.retrbinary('RETR ' + path, f.write)
+        ftps.close()
+    except Exception as e:
+        os.remove(filename)
+        raise e
+
     
-def download(URLs, username, password):
+def download(URLs, username, password, max_parallel=0, proxy=None, filenames=None):
     threads = []
     downloads = []
     logger = Logger()
@@ -195,8 +252,12 @@ def download(URLs, username, password):
     if type(URLs) != list:
         URLs = [URLs]
     
-    for url in URLs:
-        filename = url.split('/')[-1]
+    for idx, url in enumerate(URLs):
+        if filenames:
+            filename = filenames[idx]
+        else:
+            filename = url.split('/')[-1]
+            
         if os.path.exists(filename):
             logger.log('Warning', 'File already exists, skipping: ' + filename)
             continue
@@ -204,17 +265,20 @@ def download(URLs, username, password):
         url_type = url.split(':')[0]
         
         try:
-            filesize = get_size(url, username, password)
+            print('Getting filesize for file {:d} of {:d}'.format(idx+1, len(URLs)))
+            filesize = get_size(url, username, password, proxy)
             if filesize < 0:
                 logger.log('Warning', 'Could not get filesize for {:s}'.format(url))
-            
             if url_type == 'http' or url_type == 'https':
-                check_http_statuscode(url)
-                threads.append((Thread(target=download_http, args=(url, username, password)), url))
+                check_http_statuscode(url, username, password)
+                threads.append((Thread(target=download_http, args=(url, username, password, proxy, filename)), url))
             elif url_type == 'ftp':
-                threads.append((Thread(target=download_ftp, args=(url, username, password)), url))
+                threads.append((Thread(target=download_ftp, args=(url, username, password, proxy)), url))
             elif url_type == 'ssh' or url_type == 'sftp':
+#TODO: add proxy for ssh
                 threads.append((Thread(target=download_ssh, args=(url, username, password)), url))
+            elif url_type == url_type == 'ftps:' or url_type == 'ftpes':
+                threads.append((Thread(target=download_ftps, args=(url, username, password)), url))
             else:
                 pass
         except Exception as e:
@@ -225,21 +289,35 @@ def download(URLs, username, password):
             continue
         downloads.append((filename, filesize))
 
-    try:
-        for t in threads:
-            t[0].start()
-    except Exception as e:
-        logger.log_debug('Error', str(e), url)
-        logger.log('Error', str(e), t[1])
-        if os.path.exists(filename):
-            os.remove(filename)
+    if downloads:
+        Thread(target=progress, args=[downloads, threads]).start()
 
-    show_progress = Thread(target=progress, args=[downloads, threads])
-    show_progress.start()
-    for t in threads:
-        t[0].join()
-    show_progress.join()
+    active_threads = []
+    thread_list = [t[0] for t in threads]
     
+    #TODO: improve!
+    if not max_parallel:
+        max_parallel = 10
+        
+    while active_threads or thread_list:
+        try: 
+            for t in thread_list:
+                if len(active_threads) < max_parallel:
+                    t.start()
+                    active_threads.append(t)
+                    thread_list.remove(t)
+                    continue
+            for t in active_threads:
+                if not t.is_alive():
+                    active_threads.remove(t)
+                    continue
+            time.sleep(0.05)
+        except Exception as e:
+            logger.log_debug('Error', str(e), url)
+            logger.log('Error', str(e), t[1])
+            if os.path.exists(filename):
+                os.remove(filename)
+
 
 def load_credentials():
     filename = os.path.expanduser('~') + '/.eou_cred'
@@ -289,11 +367,12 @@ def read_credentials(requested_host=None):
         
 class SSO:
     def __init__(self):
-        self.threshold = 1000*1000
+        self.threshold = 1000*100
         self.cookies = tempfile.mkdtemp() + '/keksi'
         self.logged_in = False
         self.login_failed = False
         self._dummy_filename = 'sso_login.html'
+        self.proxy = None
         
         
     def curl(self):
@@ -304,10 +383,12 @@ class SSO:
         curl.setopt(pycurl.SSL_VERIFYHOST, False)
         curl.setopt(pycurl.SSL_VERIFYPEER, False)
         curl.setopt(pycurl.NOBODY, True)
+        if self.proxy:
+            curl.setopt(pycurl.PROXY, self.proxy)
         return curl
         
         
-    def is_SSO(self, url):
+    def is_SSO(self, url, proxy=None):
         if self.logged_in:
             return True
         
@@ -320,18 +401,17 @@ class SSO:
             return False
         
         filename = url.split('/')[-1]
-        download_curl(url, None, None)
-        downloaded_file = open(filename, 'r')
-        down_file_content = downloaded_file.read()
-        downloaded_file.close()
+        download_curl(url, None, None, proxy)
+        with open(filename, 'r') as f:
+            down_file_content = f.read()
+        os.remove(filename)
         if re.search('<title>EO SSO</title>', down_file_content):
             return True
         else:
             return False
             
-#TODO: try with non-cached (new) product            
-#TODO: refactor: remove url
-    def check_SSO_login(self, url, username, password):
+            
+    def check_SSO_login(self):
         self.login_failed = True
         if os.path.getsize(self._dummy_filename) < self.threshold:
             with open(self._dummy_filename, 'r') as downloaded_file:
@@ -349,81 +429,44 @@ class SSO:
                 raise Exception('Could not log into SSO.')
             
             self.logged_in = True
-            
-            oads_response = ET.fromstring(response)
-            oads_namespace = re.search('\{.+\}', oads_response.tag).group(0)
-            oads_code = oads_response.find(oads_namespace + 'ResponseCode')
-            oads_message = oads_response.find(oads_namespace + 'ResponseMessage')
-            self.logged_in = True            
-            
-            if oads_code is not None and oads_code.text != 'ACCEPTED':
-                raise Exception('[OADS error] ' + oads_code.text + (': ' + oads_message.text if oads_message is not None else ''))
-            #TODO: implement polling (?)
-            elif oads_code is not None and oads_code.text == 'ACCEPTED':
-                wait = int(oads_response.find(oads_namespace + 'RetryAfter').text)
-                print('Authorized for downloading the product, waiting {:d} seconds until it\'s ready'.format(wait))
-                time.sleep(wait)
-                
-                self.logged_in = False
-                self.login_failed = False
-                self.login(url, username, password)
-                            
+            self.login_failed = False
         else:
             os.remove(self._dummy_filename)
             self.logged_in = True
             self.login_failed = False
-
-#TODO: REFACTOR!!!
-    def check_OADS(self, response, url):
-        oads_response = ET.fromstring(response)
-        oads_namespace = re.search('\{.+\}', oads_response.tag).group(0)
-        oads_code = oads_response.find(oads_namespace + 'ResponseCode')
-        oads_message = oads_response.find(oads_namespace + 'ResponseMessage')
+            
+            
+    def check_OADS(self, url):
+        c = self.curl()
+        c.setopt(pycurl.URL, url)
+        c.setopt(pycurl.NOBODY, False)
+        
+        c.setopt(pycurl.WRITEFUNCTION, self.download_block)
+        try:
+            c.perform()
+        except:
+            pass
+        c.close()
+        
+        with open(self._dummy_filename) as f:
+            response = f.read()
+        os.remove(self._dummy_filename)
+        
+        try:
+            oads_response = ET.fromstring(response)
+            oads_namespace = re.search('\{.+\}', oads_response.tag).group(0)
+            oads_code = oads_response.find(oads_namespace + 'ResponseCode')
+            oads_message = oads_response.find(oads_namespace + 'ResponseMessage')
+        except ET.ParseError:
+            return
         
         if oads_code is not None and oads_code.text != 'ACCEPTED':
             raise Exception('[OADS error] ' + oads_code.text + (': ' + oads_message.text if oads_message is not None else ''))
-#TODO: implement polling (?)            
         elif oads_code is not None and oads_code.text == 'ACCEPTED':
             wait = int(oads_response.find(oads_namespace + 'RetryAfter').text)
             print('Authorized for downloading the product, waiting {:d} seconds until it\'s ready'.format(wait))
             time.sleep(wait)
-        
-        sucess = False
-        
-        while not sucess:
-            print 'Waiting done, trying again'
-            filename = url.split('/')[-1]
-            try:            
-                c = self.curl()
-                c.setopt(pycurl.URL, url)
-                c.setopt(pycurl.NOBODY, False)
-                c.setopt(pycurl.WRITEFUNCTION, self.download_block)
-                c.perform()
-            except:
-                pass
-            
-            with open(filename, 'r') as downloaded_file:
-                response = downloaded_file.read()
-            os.remove(filename)
-            
-            try:
-                oads_response = ET.fromstring(response)
-                oads_namespace = re.search('\{.+\}', oads_response.tag).group(0)
-                oads_code = oads_response.find(oads_namespace + 'ResponseCode')
-                oads_message = oads_response.find(oads_namespace + 'ResponseMessage')
-            except:
-                sucess = True
-                break
-            
-            if oads_code is not None and oads_code.text != 'ACCEPTED':
-                raise Exception('[OADS error] ' + oads_code.text + (': ' + oads_message.text if oads_message is not None else ''))
-    #TODO: implement polling (?)            
-            elif oads_code is not None and oads_code.text == 'ACCEPTED':
-                #wait = int(oads_response.find(oads_namespace + 'RetryAfter').text)
-                wait = 180
-                print('Authorized for downloading the product, waiting {:d} seconds until it\'s ready'.format(wait))
-                time.sleep(wait)
-        
+            self.check_OADS(url)
             
             
     def download_SSO(self, url):
@@ -447,25 +490,29 @@ class SSO:
     def get_size(self, url):
         if not self.logged_in:
             return
+            
+        self.check_OADS(url)
 
         size = -1
         c = self.curl()
         c.setopt(pycurl.NOBODY, False)
-        c.setopt(pycurl.WRITEFUNCTION, lambda x: 0)
+        c.setopt(pycurl.WRITEFUNCTION, self.download_block)
         c.setopt(pycurl.URL, url)
         try:        
             c.perform()
         except pycurl.error:
             size = int(c.getinfo(pycurl.CONTENT_LENGTH_DOWNLOAD))
         finally:
+            os.remove(self._dummy_filename)
             c.close()
         return size
     
     
-    def login(self, url, username, password):
+    def login(self, url, username, password, proxy=None):
         if self.logged_in or self.login_failed:
             return
         
+        self.proxy = proxy
         c = self.curl()        
         c.setopt(pycurl.URL, url)
         c.perform()
@@ -478,11 +525,11 @@ class SSO:
             c.perform()
         except:
             pass
-        finally:
-            #TODO: remove check_http_status code (maybe too much requests for the limited quota)
-            check_http_statuscode(url)
-            self.check_SSO_login(url, username, password)
-            c.close()
+        
+        #TODO: remove check_http_status code (maybe too much requests for the limited quota)
+        check_http_statuscode(url, username, password)
+        self.check_SSO_login()
+        c.close()
             
         
     def download_block(self, buf):
@@ -509,7 +556,7 @@ class Logger:
         for log in self.logs:
             print(log)
     #TODO: remove debugging stuff for release
-#        self.write_debug()
+        self.write_debug()
             
     def reset_log(self):
         self.logs = []
@@ -540,7 +587,10 @@ if __name__ == '__main__':
     parser.add_argument('-s', action='store_true', dest='store_cred', help='the given username and password are written to the file "{:s}" (encrypted)'.format(cred_filename))
     parser.add_argument('-r', action='store_true', dest='read_cred', help='reads the credentials from "{:s}" (if username and password are provided this option is ignored)'.format(cred_filename))
     parser.add_argument('-q', metavar='daily_quota', dest='daily_quota', help='the maximum number of dowloads performed per day')
+    parser.add_argument('-c', metavar='parallel_downloads', dest='max_parallel_downloads', help='the maximum number of parallel (concurrent) downloads performed at a time')
     parser.add_argument('--clean', action='store_true', dest='clean_credentials', help='deletes the file "{:s}" if available (if -s is set, the old file gets deleted first and is replaced by a new one)'.format(cred_filename))
+    parser.add_argument('-d', metavar='proxy', dest='proxy', help='proxy server, you have to state the proxy and the port, e.g. 127.0.0.1:8080')
+    parser.add_argument('-x', metavar='sci_hub', dest='sci_hub', help='downloads the files from a Sci Hub cart file (XML)')
     args = parser.parse_args()
     
     if not len(sys.argv) > 1:
@@ -550,9 +600,11 @@ if __name__ == '__main__':
     logger = Logger()
     lines = []
     daily_quota = 0
+    max_parallel_downloads = 0
     username = args.username
     password = args.password
-    regex = '(http[s]?://.*)|(ftp://.*)|(ssh://.*)|(sftp://.*)'
+    proxy = args.proxy
+    regex = '(http[s]?://.*)|(ftp://.*)|(ssh://.*)|(sftp://.*)|(ftps://.*)|(ftpes://.*)'
     URLs = filter(lambda x: re.match(regex, x), args.URLs)
     
     if args.input_list:
@@ -567,9 +619,29 @@ if __name__ == '__main__':
             os.remove(cred_filename)
             logger.log('Info', 'Deleted the credential file {:s}'.format(cred_filename))
             del cred_filename
+            
+    if args.sci_hub:
+        sci_hub = ET.parse(args.sci_hub)
+        sci_hub_root = sci_hub.getroot()
+        sci_hub_files = list(sci_hub_root)
+        for sci in sci_hub_files:
+            print('Start download of {:s}'.format(sci.attrib['name']))
+            try:
+                download_http(sci[1].text, username, password, proxy, sci.attrib['name'])
+            except Exception as e:
+                logger.log('Error', e)
+        logger.print_log()
+        print('Finished downloading files from Sci Hub')
+        exit(0)
 
     if len(URLs) < len(args.URLs) + len(lines):
         logger.log('Warning', 'Not all given links are valid and can be added to the URL list.')
+    
+    old_url_cnt = len(URLs)
+    URLs = set(URLs)
+    URLs = list(URLs)
+    if len(URLs) < old_url_cnt:
+        logger.log('Warning', 'Removed duplicate links.')
     
     if not URLs:
         print('No valid download links were given, exiting now.')
@@ -578,7 +650,12 @@ if __name__ == '__main__':
         
     if args.daily_quota:
         daily_quota = int(args.daily_quota)
-    
+        
+    if args.max_parallel_downloads:
+        max_parallel_downloads = int(args.max_parallel_downloads)
+    else:
+        max_parallel_downloads = 10
+
     host = URLs[0].split('://')[1].split('/')[0]
     if args.read_cred:
         if username and password:
@@ -599,7 +676,7 @@ if __name__ == '__main__':
 
     if daily_quota:
         while URLs:
-            download(URLs[0:daily_quota], username, password)
+            download(URLs[0:daily_quota], username, password, max_parallel_downloads)
             del URLs[0:daily_quota]
             
             tomorrow = (date.today() + timedelta(days=1))
@@ -609,7 +686,7 @@ if __name__ == '__main__':
                 print('Download quota for today reached, waiting for {:3.2f} minutes.'.format(till_tomorrow/60))
                 time.sleep(till_tomorrow)
     else:
-        download(URLs, username, password)
+        download(URLs, username, password, max_parallel_downloads, proxy)
         
     logger.print_log()
     print('Finished all downloads')
