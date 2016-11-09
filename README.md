@@ -29,17 +29,28 @@ python <installationPath/>eoudat.py [-h] [-u username] [-p password] [url][-l li
 
 Where:
 [-h] shows the help message, describing the functionalities of the tool
+
 [-u username] is an optional field, necessary just for files protected by authentication
+
 [-p password] is an optional field, necessary just for files protected by authentication
+
 [url] represent the addresses of the files to download
+
 [-l list_of_URLs] proving a text file (list_of_URLs) which contains a list of URLs, it allows to downloaded all of the file inside the list
+
 [-s] is a command, that allows to save and store authentication credentials
+
 [-r] is a command, that allows to re-use saved credentials
+
 [-q daily quota] allows to set a maximum number of downloaded files per day; if set, this option sets the console on idle after having downloaded the defined daily quota; as soon as the day changes, the tool restarts downloading; this loop ends once all files have been downloaded 
+
 [-c parallel_downloads] allows to configure the number of parallel downloads to be started
+
 [--clean] deletes the file in which the credentials are stored
+
 [-x] allows the user to download files from a Sci Hub cart file
-[-d] allows the user to download files behind a proxy, specifying address and port of it.
+
+[-d] allows the user to download files behind a proxy, specifying address and port of it
 
 
 When the tool is launched, it will proceed with the download of the files, showing the status of the downloads. When the “Downloading: 100%” is achieved, a message of complete download will appear. It marks the end of the process.
