@@ -556,7 +556,7 @@ class Logger:
         for log in self.logs:
             print(log)
     #TODO: remove debugging stuff for release
-        self.write_debug()
+        #self.write_debug()
             
     def reset_log(self):
         self.logs = []
