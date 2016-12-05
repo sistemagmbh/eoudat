@@ -386,9 +386,6 @@ class Logger:
     def print_log(self):
         for log in self.logs:
             print(log)
-            
-    def reset_log(self):
-        self.logs = []
 
         
 SSO = lambda single_SSO = SSO(): single_SSO
