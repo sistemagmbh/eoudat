@@ -35,16 +35,16 @@ The tool has to be launched from the command line using the following command:
 | ---------- | ------------ | --------------- |
 |  | url | one or more URLs to be downloaded |
 | -h | | show this help message and exit |
-| -u  | *<username>* | username for downloading the file(s) (only if needed) |
-| -p | <*password>* | password for the user's account (only if needed) |
-|-l | *<list_of_URLs>* | path to text file which includes a list of files (one URL per line) to be downloaded (the URLs get appended to the URls given in the command line) |
+| -u  | *username* | username for downloading the file(s) (only if needed) |
+| -p | *password* | password for the user's account (only if needed) |
+|-l | *list_of_URLs* | path to text file which includes a list of files (one URL per line) to be downloaded (the URLs get appended to the URls given in the command line) |
 | -s | | the given username and password are written to "~/.eou_cred" (encrypted) |
 | -r | | reads the credentials from "~/.eou_cred" (if username and password are provided this option is ignored) |
-| -q | *<daily_quota>* | the maximum number of dowloads performed per day |
-| -c | *<nr_downloads>* | the maximum number of parallel (concurrent) downloads performed at a time |
+| -q | *daily_quota* | the maximum number of dowloads performed per day |
+| -c | *nr_downloads* | the maximum number of parallel (concurrent) downloads performed at a time |
 | -\-clean | | deletes the credential-file if available (if -s is set, the old file gets deleted first and is replaced by a new one) |
-| -x | *<sci_hub>* | downloads the files from a Sci Hub cart file (XML) |
-| -d | *<proxy>* | proxy server, you have to state the proxy and the port, e.g. 127.0.0.1:8080 |
+| -x | *sci_hub* | downloads the files from a Sci Hub cart file (XML) |
+| -d | *proxy* | proxy server, you have to state the proxy and the port, e.g. 127.0.0.1:8080 |
 
 
 When the tool is launched, it will start with the download of the files, showing a message when the download of a file starts and a message when a file has been downloaded completly.
