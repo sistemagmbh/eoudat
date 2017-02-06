@@ -13,7 +13,7 @@ The tool can also: mangage to download a list of file, manage multiple download,
 
 ## REQUIREMENTS:
 
-The tool was tested on Ubuntu 16.04 and Windows 10, but in future it will be available also for other distributions.   
+The tool was tested on Ubuntu 16.04 and Windows 10, but in future it will be available also for other distributions.
 
 The following packages shall be installed in order to run the module:
 - Python 2.7 or higher
@@ -21,11 +21,11 @@ The following packages shall be installed in order to run the module:
 	- Paramiko
 	- Cryptography
 	 
-For Windows users, the *win_install_script/eoudat_pip.bat* script allows installing the needed dependencies; please refer to the installation instructions (EOUDAT_installation_instructions.pdf) for detailed configurations
+For Windows users, the *win_install_script/eoudat_pip.bat* script allows installing the needed dependencies; please refer to the installation instructions (EOUDAT_installation_instructions.pdf) for detailed configurations.
 
 ## USAGE:
 
-The following command like shall be provided:
+The tool has to be launched from the command line using the following command:
 
     python <installationPath>/eoudat.py [-h] [-u username] [-p password] [url][-l list_of_URLs] [-s] [-r] [-q daily quota][-c parallel_downloads] [--clean] [-d proxy] [-x 	sci_hub]
 
@@ -58,7 +58,7 @@ Below is displayed an example of instruction, in order to download a protected f
 
 ## DOCUMENTATION:
 
-The EOUDAT_installation_instructions.pdf provides dependencies and installation instructions under Linux and Windows
+The EOUDAT_installation_instructions.pdf provides dependencies and installation instructions for Linux and Windows.
 
 ## LICENCE:
 
