@@ -311,6 +311,7 @@ class SSO:
             return
         
         filename = url.split('/')[-1]
+        print 'Starting to download {:s}'.format(filename)
         c = self.curl()
         c.setopt(pycurl.URL, url)
         c.setopt(pycurl.NOBODY, False)
@@ -318,6 +319,7 @@ class SSO:
             c.setopt(pycurl.WRITEFUNCTION, f.write)
             c.perform()
             c.close()
+            print 'Finished downloading {:s}'.format(filename)
 
     def get_size(self, url):
         c = pycurl.Curl()
@@ -355,7 +357,11 @@ class SSO:
         except:
             pass
 
-        self.check_SSO_login()
+        try:
+            self.check_SSO_login()
+        except Exception as e:
+            logger = Logger()
+            logger.log('Error', e)
         c.close()
             
         
@@ -398,13 +404,14 @@ if __name__ == '__main__':
     parser.add_argument('-u', metavar='username', dest='username', help='username for downloading the file(s) (only if needed)')
     parser.add_argument('-p', metavar='password', dest='password', help='password for the user\'s account (only if needed)')
     parser.add_argument('-l', metavar='list_of_URLs', dest='input_list', help='path to text file which includes a list of files (one URL per line) to be downloaded (the URLs get appended to the URls given in the command line)')
-    parser.add_argument('-s', action='store_true', dest='store_cred', help='the given username and password are written to the file "{:s}" (encrypted)'.format(cred_filename))
+    parser.add_argument('-s', action='store_true', dest='store_cred', help='the given username and password are written to "{:s}" (encrypted)'.format(cred_filename))
     parser.add_argument('-r', action='store_true', dest='read_cred', help='reads the credentials from "{:s}" (if username and password are provided this option is ignored)'.format(cred_filename))
     parser.add_argument('-q', metavar='daily_quota', dest='daily_quota', help='the maximum number of dowloads performed per day')
-    parser.add_argument('-c', metavar='parallel_downloads', dest='max_parallel_downloads', help='the maximum number of parallel (concurrent) downloads performed at a time')
+    parser.add_argument('-c', metavar='nr_downloads', dest='max_parallel_downloads', help='the maximum number of parallel (concurrent) downloads performed at a time')
     parser.add_argument('--clean', action='store_true', dest='clean_credentials', help='deletes the file "{:s}" if available (if -s is set, the old file gets deleted first and is replaced by a new one)'.format(cred_filename))
     parser.add_argument('-d', metavar='proxy', dest='proxy', help='proxy server, you have to state the proxy and the port, e.g. 127.0.0.1:8080')
     parser.add_argument('-x', metavar='sci_hub', dest='sci_hub', help='downloads the files from a Sci Hub cart file (XML)')
+    parser.add_argument('-v', metavar='version', dest='version', help='show version information')
     args = parser.parse_args()
     
     if not len(sys.argv) > 1:
@@ -503,4 +510,4 @@ if __name__ == '__main__':
         download(URLs, username, password, max_parallel_downloads, proxy)
         
     logger.print_log()
-    print('Finished all downloads')
+    print('Finished')
